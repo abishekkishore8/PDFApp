@@ -1,32 +1,44 @@
 package com.example.javaapp;
 
-import androidx.appcompat.app.AppCompatActivity;
+import static java.io.File.createTempFile;
 
+import android.Manifest;
+import android.app.Activity;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
-import android.provider.MediaStore;
 import android.provider.OpenableColumns;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
-import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import android.app.Activity;
-import android.net.Uri;
-import androidx.annotation.Nullable;
-
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.documentfile.provider.DocumentFile;
+
 import java.io.File;
+import java.io.FileDescriptor;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 public class SecondActivity extends AppCompatActivity {
     EditText textName, password, repassword, textEmail;
@@ -90,7 +102,27 @@ public class SecondActivity extends AppCompatActivity {
         UpResumeBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.M){
+                    if(ContextCompat.checkSelfPermission(getApplicationContext(), Manifest.permission.READ_EXTERNAL_STORAGE)!= PackageManager.PERMISSION_GRANTED){
+                        ActivityCompat.requestPermissions(SecondActivity.this,new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},100);
+                    }
+                }
+                if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.R){
+                    if(!Environment.isExternalStorageManager()){
+                        try{
+                            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                            intent.addCategory("android.intent.category.DEFAULT");
+                            intent.setData(Uri.parse(String.format("package:%s",getApplicationContext().getPackageName())));
+                            startActivityIfNeeded(intent,101);
+                        }catch (Exception exception){
+                            Intent intent=new Intent();
+                            intent.setAction(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                            startActivityIfNeeded(intent,101);
+                        }
+                    }
+                }
                 pickPdfFile();
+
             }
         });
         textEmail.addTextChangedListener(new TextWatcher() {
@@ -186,13 +218,36 @@ public class SecondActivity extends AppCompatActivity {
                 Uri contentUri = ContentUris.withAppendedId(Uri.parse("content://downloads/public_downloads"), Long.parseLong(documentId));
                 filePath = getDataColumn(this, contentUri, null, null);
             }
-        } else if ("content".equalsIgnoreCase(uri.getScheme())) {
+            else if (DocumentsContract.isDocumentUri(this, uri)) {
+                // If the URI is a document URI, use DocumentFile
+                // This is for Android O and above
+                try {
+                    ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "r");
+                    if (pfd != null) {
+                        FileDescriptor fd = pfd.getFileDescriptor();
+                        InputStream inputStream = new FileInputStream(fd);
+
+                        // Create a temporary file
+                        File tempFile = createTempFile("temp_pdf", ".pdf", getCacheDir());
+
+                        // Copy the content of the input stream to the temporary file
+                        copyStreamToFile(inputStream, tempFile);
+
+                        // Get the absolute path of the temporary file
+                        filePath = tempFile.getAbsolutePath();
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            } else if ("content".equalsIgnoreCase(uri.getScheme())) {
             // For devices running versions lower than KitKat
             filePath = getDataColumn(this, uri, null, null);
         } else if ("file".equalsIgnoreCase(uri.getScheme())) {
             // For file-based URIs
             filePath = uri.getPath();
         }
+        }
+
 
         return filePath;
     }
@@ -218,5 +273,16 @@ public class SecondActivity extends AppCompatActivity {
         // Implement your email validation logic here
         // For a simple example, we are checking if the email contains '@'
         return email.contains("@");
+    }
+    private void copyStreamToFile(InputStream inputStream, File outputFile) throws IOException {
+        try (OutputStream outputStream = new FileOutputStream(outputFile)) {
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+        } finally {
+            inputStream.close();
+        }
     }
 }
